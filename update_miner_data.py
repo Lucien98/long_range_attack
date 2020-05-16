@@ -56,3 +56,15 @@ def update_msg_time(miner_id, hash):
 	db.commit()
 	cur.close()
 	db.close()
+
+def get_vote_field(hash,field):
+	sql = "select " + field + " from vote where hash = '" + str(hash) + "';"
+	db = pymysql.connect("localhost", "root", "root", "attack_casper")
+	cur = db.cursor()
+	cur.execute(sql)
+	res = cur.fetchall()[0][0]
+	db.commit()
+	cur.close()
+	db.close()
+
+	return res

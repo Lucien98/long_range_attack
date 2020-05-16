@@ -1,4 +1,7 @@
 from parameters import *
+from get_voting_power import write_txt
+from get_voting_power import read_txt
+
 import pymysql
 import random
 
@@ -53,6 +56,8 @@ def init():
 	voting_power = stake = [0.28888417, 0.0820192, 0.06432365,\
 	 0.11630922, 0.12024268, 0.13770893, 0.01833147, 0.02759777,\
 	  0.05940994, 0.08517291]#partition(Num_miners)
+	write_txt('vpa_lr', voting_power)
+	write_txt('vph_lr', voting_power)
 	attacker_ratio = 0
 	for i in miners['attacker']:
 		attacker_ratio = attacker_ratio + stake[i]
@@ -102,6 +107,17 @@ def init():
 		db.rollback()
 	cursor.close()
 	db.close()
+
+def elect_proposal(chain):
+	max_voting_power = 0
+	if chain == 'attack':
+		voting_power = read_txt('vpa_lr')
+	if chain == 'honest':
+		voting_power = read_txt('vph_lr')
+	max_voting_power = sorted(voting_power, reverse = True)[0]
+	for i in range(0, Num_miners):
+		if voting_power[i] == max_voting_power:
+			return i
 
 """ 获取某矿工在某链上的最高点区块hash
 	returns hash of highest block 
@@ -155,20 +171,12 @@ def propose_block(chain, id, N):
 			sql_max_height + ") and hash in " + blocks
 	cursor.execute(sql_head)
 	result = cursor.fetchall()[0]
-	# 取出voting_power
 	pre_hash = eval(result[0]) # field pre_hash
 	stake = eval(result[1]) #field stake
 	height = result[2] + 1 #field height
 	voting_power = eval(result[3]) #field voting_power
 	accu_regular_num = result[4] #field accu_regular_num
-	max_voting_power = sorted(voting_power,reverse = True)[0]
-	proposal_id = -1
-	for i in range(0,Num_miners):
-		if voting_power[i] == max_voting_power:
-			proposal_id = i
-			break
-	if proposal_id != id:
-		return
+	proposal_id = id
 	hash = random.randint(1,10**30) #field hash
 	type = ''
 	is_in_attack_chain = -1 
@@ -191,7 +199,7 @@ def propose_block(chain, id, N):
 						(10**Precision)
 			stake[receiver] += transfer_stake
 			stake[receiver] = int(stake[receiver]*(10**Precision))/\
-						(10**Precision)#设置当前区块的voting_power
+						(10**Precision)
 			type = 'regular'
 			is_in_attack_chain = 0
 			accu_regular_num += 1
@@ -215,12 +223,16 @@ def propose_block(chain, id, N):
 				transfer_stake = int(float(result[0][2])*(10**Precision))/\
 						(10**Precision)
 				
-				stake[sender] -= transfer_stake + Transaction_Fees
-				stake[sender] = int(stake[sender]*(10**Precision))/\
-						(10**Precision)
-				stake[receiver] += transfer_stake
-				stake[receiver] = int(stake[receiver]*(10**Precision))/\
-						(10**Precision)
+				if stake[sender] - (transfer_stake + Transaction_Fees) > 0:
+					stake[sender] -= (transfer_stake + Transaction_Fees)
+					stake[sender] = int(stake[sender]*(10**Precision))/\
+							(10**Precision)
+					stake[receiver] += transfer_stake
+					stake[receiver] = int(stake[receiver]*(10**Precision))/\
+							(10**Precision)
+					stake[id] += Transaction_Fees
+					stake[id] = int(stake[id]*(10**Precision))/\
+							(10**Precision)
 				sql_update_transfer = \
 					"update transfer set is_copied = 1 \
 					 where sender_id = " + str(sender) \
@@ -230,12 +242,16 @@ def propose_block(chain, id, N):
 			type = 'regular'
 			is_in_attack_chain = 1
 			accu_regular_num += 1
+	voting_power = read_txt('vph_lr') if chain == 'honest' \
+	else read_txt('vpa_lr')
 	minus = 0
 	for i in range(0, Num_miners):
 		if i != proposal_id:
 			voting_power[i] += stake[i]
 			minus += stake[i]
 	voting_power[proposal_id] -= minus
+	write_txt('vph_lr', voting_power) if chain == 'honest' \
+	else write_txt('vpa_lr', voting_power)	
 	for i in range(0, Num_miners):
 		voting_power[i] = float(("%."+str(Precision)+ "f") % voting_power[i])			
 	attacker_ratio = 0
@@ -255,7 +271,7 @@ def propose_block(chain, id, N):
 		+ "'" + str(attacker_ratio) + "'" + ");"
 	sql_broadcast = broadcast(chain, hash, (N+1)*Block_Proposal_Time, proposal_id)
 	cursor.execute(sql_block)
-	print("miner "+ str(view_id) + " propose "+ str(N + 1) + "th block " + str(hash) + " in " + chain + " chain")
+	print("miner "+ str(proposal_id) + " propose "+ str(N + 1) + "th block " + str(hash) + " in " + chain + " chain")
 	cursor.execute(sql_broadcast)
 	print("this block is broadcasted by inserting some records in msg_receival table")
 	db.commit()
@@ -275,6 +291,8 @@ def broadcast(chain, hash, time, proposal_id):
 		for i in range(0, Num_miners) :
 			if i != proposal_id:
 				delay = 1 + int(random.expovariate(1)*100)
+				if delay > 1.5*EPOCH_SIZE*Block_Proposal_Time:
+					delay = 1.5*EPOCH_SIZE*Block_Proposal_Time
 				sql_msg_receival += "(" + str(i) + ","\
 						+ "'block'," \
 						+ "'" + str(hash) + "',"\
@@ -304,6 +322,37 @@ def broadcast(chain, hash, time, proposal_id):
 	sql_msg_receival = sql_msg_receival[0:-1]
 	sql_msg_receival += ';'
 	return sql_msg_receival
+
+def brdcst_atk_blk(time):
+	sql_get_attack_blocks = "select hash from block where is_in_attack_chain = 1 and length(voting_power) != 1;"
+	db = pymysql.connect("localhost", "root", "root", "attack")
+	cur = db.cursor()
+	cur.execute(sql_get_attack_blocks)
+	res = cur.fetchall()
+	blocks = ()
+
+	sql_msg_receival = 'insert into msg_receival values'
+	for i in range(len(res)):
+		for miner in miners['honest']:
+			# sql_update_block = "update block set is_in_attack_chain = 2 where hash = '" + str(res[i][0]) + "';"
+			# cur.execute(sql_update_block)
+			delay = 1 + int(random.expovariate(1)*300)
+			sql_msg_receival += "(" + str(miner) + ","\
+						+ "'block'," \
+						+ "'" + str(res[i][0]) + "',"\
+						+ str(time+delay) + "),"
+			blocks = blocks + (str(res[i][0]),)
+	blocks = str(blocks).replace("),", ")")
+	sql_update_block = "update block set voting_power = '0' where hash in " + blocks + ";"
+	sql_msg_receival = sql_msg_receival[0:-1]
+	sql_msg_receival += ";"
+
+	cur.execute(sql_update_block)
+	cur.execute(sql_msg_receival)
+	db.commit()
+	cur.close()
+	db.close()
+
 
 """获取一个节点的processed视图
 返回的是一个int型元组，其中元素为hash值
@@ -364,7 +413,10 @@ def get_dependencies(miner_id, is_in_attack_chain):
 	db.close()
 	dep = res_dep[0][0]
 	if miner_id not in miners['honest']:
-		dep = dep.split(";")[is_in_attack_chain]
+		if is_in_attack_chain:
+			dep = dep.split(";")[1]
+		else:
+			dep = dep.split(";")[0]
 	return eval(dep)
 
 def update_dependencies(miner_id, is_in_attack_chain, dep):
@@ -435,6 +487,9 @@ def process_block(N):
 	cursor = db.cursor()
 	cursor.execute(sql_receive_block)
 	result = cursor.fetchall()
+	db.commit()
+	cursor.close()
+	db.close()
 	if len(result) == 0:
 		return
 	
@@ -442,7 +497,6 @@ def process_block(N):
 		receiver = msg[0]
 		block_hash = msg[2]# typr:str
 		on_receive(receiver, block_hash)
-
 # miners = generate_attacker()
 miners['attacker'] = [1, 3, 8]
 miners['honest'] = [0, 2, 4, 5, 6, 7, 9]

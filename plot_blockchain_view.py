@@ -5,13 +5,16 @@ import pygraphviz
 import matplotlib.pyplot as plt
 import random
 import pymysql
+import pdb
 
 def miner_view(miner_id):
 	blocks = []
+	#pdb.set_trace()
 	if miner_id in miners['attacker']:
 		processed = get_processed(miner_id, 0)
 		for block_hash in processed:
 			blocks.append(str(block_hash))
+		#pdb.set_trace()
 		processed = get_processed(miner_id, 1)
 		for block_hash in processed:
 			blocks.append(str(block_hash))
@@ -19,6 +22,7 @@ def miner_view(miner_id):
 		processed = get_processed(miner_id, 0)
 		for block_hash in processed:
 			blocks.append(str(block_hash))
+	
 	blocks = str(blocks)
 	blocks = blocks.replace("[","(")
 	blocks = blocks.replace("]",")")
@@ -40,6 +44,8 @@ def miner_view(miner_id):
 		G.add_node(hash, object = [item[3],height])#item[3]是字符串类型,type
 		if hash != pre_hash:
 			G.add_edge(hash, pre_hash, object = item[2])#item[2]是int型,is_in_attack_chain
+	#pdb.set_trace()
+	assert G.number_of_nodes() == G.number_of_edges() + 1, "Something Wrong! "
 	return G
 
 def plot_miner_view(miners, image_file):

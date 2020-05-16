@@ -1,11 +1,14 @@
-from long_range_attack import partition
 from parameters import *
+
+from long_range_attack import partition
 from long_range_attack import miners
-from long_range_attack import broadcast
+
 from update_miner_data import update_field
 from update_miner_data import get_field
 from update_miner_data import get_block_field
 from update_miner_data import update_msg_time
+from update_miner_data import get_vote_field
+
 from get_voting_power import write_txt
 from get_voting_power import read_txt
 
@@ -44,6 +47,11 @@ def init():
 	height = 0
 	is_in_attack_chain = 2
 	accu_regular_num = 1
+	voting_power = stake = [0.28888417, 0.0820192, 0.06432365,\
+	 0.11630922, 0.12024268, 0.13770893, 0.01833147, 0.02759777,\
+	  0.05940994, 0.08517291]#partition(Num_miners)
+	write_txt('voting_power_attack', voting_power)
+	write_txt('voting_power_honest', voting_power)
 	attacker_ratio = 0
 	epoch = 0
 	for i in miners['attacker']:
@@ -74,6 +82,8 @@ def init():
 		tail_membership = str({hash: hash}) + ";" + str({hash: hash})
 		vote_count = "{};{}"
 		head = str(hash) + ";" + str(hash)
+		validators = str(validator) + ";" + str(validator)
+		deposit = str(deposit_attack) + ";" + str(deposit_attack)
 		sql_miners += "(" \
 			+ str(i) + "," \
 			+ "'" + processed + "'" + "," \
@@ -87,7 +97,10 @@ def init():
 			+ "'" + str(tails) + "'" + ","\
 			+ "'" + str(tail_membership) + "'" + ","\
 			+ "'" + str(vote_count) + "'" + ","\
-			+ "'" + str(head) + "'" + "),"
+			+ "'" + str(head) + "'" + ","\
+			+ "'" + str(validators) + "',"\
+			+ "'" + str(deposit) + "'"\
+			+ "),"
 	for i in miners['honest']:
 		id = i
 		processed = str((hash,))
@@ -115,7 +128,10 @@ def init():
 			+ "'" + str(tails) + "'" + ","\
 			+ "'" + str(tail_membership) + "'" + ","\
 			+ "'" + str(vote_count) + "'" + ","\
-			+ "'" + str(head) + "'" + "),"
+			+ "'" + str(head) + "'" + ","\
+			+ "'" + str(validator) + "',"\
+			+ "'" + str(deposit_honest) + "'"\
+			+ "),"
 	
 	sql_miners = sql_miners[0:-1]
 	sql_miners += ";"
@@ -226,12 +242,16 @@ def propose_block(chain, N):
 				transfer_stake = int(float(result[0][2])*(10**Precision))/\
 						(10**Precision)
 				
-				stake[sender] -= transfer_stake + Transaction_Fees
-				stake[sender] = int(stake[sender]*(10**Precision))/\
-						(10**Precision)
-				stake[receiver] += transfer_stake
-				stake[receiver] = int(stake[receiver]*(10**Precision))/\
-						(10**Precision)
+				if stake[sender] - (transfer_stake + Transaction_Fees) > 0:
+					stake[sender] -= (transfer_stake + Transaction_Fees)
+					stake[sender] = int(stake[sender]*(10**Precision))/\
+							(10**Precision)
+					stake[receiver] += transfer_stake
+					stake[receiver] = int(stake[receiver]*(10**Precision))/\
+							(10**Precision)
+					stake[proposal_id] += Transaction_Fees
+					stake[proposal_id] = int(stake[proposal_id]*(10**Precision))/\
+							(10**Precision)
 				sql_update_transfer = \
 					"update transfer set is_copied = 1 \
 					 where sender_id = " + str(sender) \
@@ -267,8 +287,8 @@ def propose_block(chain, N):
 				+ "f") % voting_power_attack[i])			
 		voting_power = voting_power_attack
 		write_txt('voting_power_attack', voting_power_attack)
-	print("voting_power_honest: " + str(voting_power_honest))
-	print("voting_power_attack: " + str(voting_power_attack))
+	#print("voting_power_honest: " + str(voting_power_honest))
+	#print("voting_power_attack: " + str(voting_power_attack))
 	attacker_ratio = 0
 	for id in miners['attacker']:
 		attacker_ratio += stake[id]
@@ -286,7 +306,7 @@ def propose_block(chain, N):
 		+       str(accu_regular_num)        +"," \
 		+ "'" + str(attacker_ratio) + "'," \
 		+ 		str(epoch) + ");"
-	sql_broadcast = broadcast(chain, hash, (N+1)*Block_Proposal_Time, proposal_id)
+	sql_broadcast = broadcast(chain, hash, (N+1)*Block_Proposal_Time, proposal_id, 'block')
 	cur.execute(sql_block)
 	print("miner "+ str(proposal_id) + " propose "+ str(N + 1) + "th block " + str(hash) + " in " + chain + " chain")
 	cur.execute(sql_broadcast)
@@ -313,30 +333,31 @@ def msg_rcv(N):
 		receiver = msg[0]
 		type = msg[1]
 		msg_hash = msg[2]# typr:str
-		on_receive(receiver, type, msg_hash)
 		update_msg_time(receiver, msg_hash)
+		on_receive(receiver, type, msg_hash, N)
 
-def on_receive(receiver, type, msg_hash):
+def on_receive(receiver, type, msg_hash, N):
 	if type == 'block':
-		res = accept_block(receiver, msg_hash)
+		res = accept_block(receiver, msg_hash, N)
 	else:
 		res =  accept_vote(receiver, msg_hash)
+		return
 	if res :
 		is_in_attack_chain = get_block_field(msg_hash, 'is_in_attack_chain')
 		dep = get_field(receiver, is_in_attack_chain, 'dependencies')
 		if int(msg_hash) in dep.keys():
 			dep = get_field(receiver, is_in_attack_chain, 'dependencies')
 			for child_hash in dep[int(msg_hash)][0]:
-				on_receive(receiver,'block', child_hash)
+				on_receive(receiver,'block', child_hash, N)
 			for child_hash in dep[int(msg_hash)][1]:
-				on_receive(receiver, 'vote', child_hash)
+				on_receive(receiver, 'vote', child_hash, N)
 			# print("miner " + str(receiver) + " deletes " + \
 			# 	str(str(hash) +":" + str(dep[int(hash)])) + "from its dependencies")
 			del dep[int(msg_hash)]
-			print("删除依赖")
+			#print("删除依赖")
 			update_field(receiver, is_in_attack_chain, 'dependencies', dep)
 
-def accept_block(receiver, hash):
+def accept_block(receiver, hash, N):
 	sql_get_block_info = "select pre_hash, is_in_attack_chain, height from "\
 			+ "block where hash = '" + str(hash) +"';" 
 	db = pymysql.connect("localhost", "root", "root", "attack_casper")
@@ -365,6 +386,7 @@ def accept_block(receiver, hash):
 	print(f"miner %d accept the block of hash {hash}" %receiver)
 	
 	processed = processed + (int(hash),)
+	#pdb.set_trace()
 	update_field(receiver, is_in_attack_chain, 'processed', processed)
 	
 	tail_membership = get_field(receiver, is_in_attack_chain, 'tail_membership')
@@ -374,6 +396,8 @@ def accept_block(receiver, hash):
 		tails[int(hash)] = int(hash)
 		update_field(receiver, is_in_attack_chain, 'tail_membership', tail_membership )
 		update_field(receiver, is_in_attack_chain, 'tails', tails)
+		if receiver in validator:
+			maybe_vote_last_checkpoint(receiver, hash, is_in_attack_chain, N)
 	else:
 		
 		tail_membership[int(hash)] = tail_membership[pre_hash]
@@ -411,7 +435,7 @@ def get_checkpoint_parent(receiver, is_in_attack_chain, hash):
 
 	tail_membership = get_field(receiver, is_in_attack_chain, 'tail_membership')
 	
-	print("观察height 和 tail_membership[pre_hash]的值为多少")
+	#print("观察height 和 tail_membership[pre_hash]的值为多少")
 	if height == 0:
 		return None
 	return tail_membership[int(pre_hash)]
@@ -428,7 +452,7 @@ def check_head(receiver, hash, is_in_attack_chain):
 	highest_justified_checkpoint_hash = get_field(receiver, is_in_attack_chain, 'highest_justified_checkpoint')
 	tail_membership = get_field(receiver, is_in_attack_chain, 'tail_membership')
 	
-	print("观察is_ancestor函数")
+	#print("观察is_ancestor函数")
 	if is_ancestor(receiver, highest_justified_checkpoint_hash, \
 		tail_membership[int(hash)], is_in_attack_chain):
 		update_field(receiver, is_in_attack_chain, 'head', hash)
@@ -445,12 +469,221 @@ def check_head(receiver, hash, is_in_attack_chain):
 					max_descendant = tails[_hash]
 		update_field(receiver, is_in_attack_chain, 'head', max_descendant)
 
-def maybe_vote_last_checkpoint(miner, hash, is_in_attack_chain):
-	target_block = hash
+def maybe_vote_last_checkpoint(miner, hash, is_in_attack_chain, N):
+	target_block = hash #参数是str类型的
 	source_block = get_field(miner, is_in_attack_chain, 'highest_justified_checkpoint')
 
-	target_block_epoch = get_block_field(target_block, 'height')
+	#target_block_epoch是int型的数据，而vote表中target_epoch也是int型
+	target_block_epoch = get_block_field(target_block, 'epoch')
+	miner_current_epoch = get_field(miner, is_in_attack_chain, 'current_epoch')
+
+	if target_block_epoch > miner_current_epoch:
+		miner_current_epoch = target_block_epoch
+		#pdb.set_trace()
+		update_field(miner, is_in_attack_chain, 'current_epoch', miner_current_epoch)
+
+		if is_ancestor(miner, source_block, target_block, is_in_attack_chain):
+			hash = random.randint(1, 10**30)
+			sender = miner
+			source_block_epoch = get_block_field(source_block, 'epoch')
+			sql_vote = "insert into vote values("\
+				+ "'" + str(hash) + "',"\
+				+ str(sender) + ","\
+				+ "'" + str(source_block) + "',"\
+				+ "'" + str(target_block) + "',"\
+				+ str(source_block_epoch) + ","\
+				+ str(target_block_epoch) + ","\
+				+ str(is_in_attack_chain) + ");"
+			chain = 'attack' if is_in_attack_chain else 'honest'
+			sql_broadcast = broadcast(chain, hash, (N+1)*Block_Proposal_Time, miner, 'vote')
+			db = pymysql.connect("localhost", "root", "root", "attack_casper")
+			cur = db.cursor()
+			cur.execute(sql_vote)
+			cur.execute(sql_broadcast)
+			db.commit()
+			cur.close()
+			db.close()
+
+"""广播区块、投票"""
+def broadcast(chain, hash, time, proposal_id, type):
+	sql_msg_receival = ''
+	if chain == 'honest':
+		sql_msg_receival = "insert into msg_receival values("\
+			+ str(proposal_id) + "," \
+			+ "'"+type+"'," \
+			+ "'" + str(hash) + "',"\
+			+ str(time+1) + "),"
+		for i in range(0, Num_miners) :
+			if i != proposal_id:
+				delay = 1 + int(random.expovariate(1)*100)
+				if delay > 1.5*EPOCH_SIZE*Block_Proposal_Time:
+					delay = 1.5*EPOCH_SIZE*Block_Proposal_Time
+				sql_msg_receival += "(" + str(i) + ","\
+						+ "'"+type+"'," \
+						+ "'" + str(hash) + "',"\
+						+ str(time+delay) + "),"
+	if chain == 'attack':
+		if proposal_id in miners['attacker']:
+			sql_msg_receival = "insert into msg_receival values("\
+				+ str(proposal_id) + "," \
+				+ "'"+type+"'," \
+				+ "'" + str(hash) + "',"\
+				+ str(time+1) + "),"
+			for i in miners['attacker']:
+				if i != proposal_id:
+					delay = 1 + int(random.expovariate(1)*100)
+					sql_msg_receival += "(" + str(i) + ","\
+							+ "'"+type+"'," \
+							+ "'" + str(hash) + "',"\
+							+ str(time+delay) + "),"
+		else:
+			sql_msg_receival = "insert into msg_receival values"
+			for i in miners['attacker']:
+				delay = 1 + int(random.expovariate(1)*100)
+				sql_msg_receival += "(" + str(i) + ","\
+						+ "'"+type+"'," \
+						+ "'" + str(hash) + "',"\
+						+ str(time+delay) + "),"
+	sql_msg_receival = sql_msg_receival[0:-1]
+	sql_msg_receival += ';'
+	return sql_msg_receival
+
+def brdcst_atk_bv(time):
+	db = pymysql.connect("localhost", "root", "root", "attack_casper")
+	cur = db.cursor()
+	sql_get_attack_blocks = "select hash from block where is_in_attack_chain = 1 and length(voting_power) != 1;"
+	cur.execute(sql_get_attack_blocks)
+	res = cur.fetchall()
+	blocks = ()
+
+	sql_msg_receival = 'insert into msg_receival values'
+	for i in range(len(res)):
+		for miner in miners['honest']:
+			# sql_update_block = "update block set is_in_attack_chain = 2 where hash = '" + str(res[i][0]) + "';"
+			# cur.execute(sql_update_block)
+			delay = 1 + int(random.expovariate(1)*300)
+			sql_msg_receival += "(" + str(miner) + ","\
+						+ "'block'," \
+						+ "'" + str(res[i][0]) + "',"\
+						+ str(time+delay) + "),"
+			blocks = blocks + (str(res[i][0]),)
+	blocks = str(blocks).replace(",)", ")")
+	sql_update_block = "update block set voting_power = '0' where hash in " + blocks + ";"
+	sql_msg_receival = sql_msg_receival[0:-1]
+	sql_msg_receival += ";"
+
+	#pdb.set_trace()
+	cur.execute(sql_update_block)
+	cur.execute(sql_msg_receival)
+	
+	sql_vote = "select hash from vote where is_in_attack_chain = 1;"
+	cur.execute(sql_vote)
+	res = cur.fetchall()
+	if len(res) == 0: return
+	votes = ()
+	sql_msg_receival = 'insert into msg_receival values'
+	for i in range(len(res)):
+		for miner in miners['honest']:
+			delay = 1 + int(random.expovariate(1)*300)
+			sql_msg_receival += "(" + str(miner) + ","\
+						+ "'vote',"\
+						+ "'" + str(res[i][0]) + "',"\
+						+ str(time+delay) + "),"
+			votes = votes + (str(res[i][0]),)
+	votes = str(votes).replace(",)", ")")
+	sql_update_vote = "update vote set is_in_attack_chain = '2' where hash in " + votes + ";"
+	sql_msg_receival = sql_msg_receival[0:-1]
+	sql_msg_receival += ";"
+
+	#pdb.set_trace()
+	cur.execute(sql_update_vote)
+	cur.execute(sql_msg_receival)
+	db.commit()
+	cur.close()
+	db.close()
+
 
 def accept_vote(receiver, hash):
+	source_hash = int(get_vote_field(hash, 'source_hash'))#是str转int
+	target_hash = int(get_vote_field(hash, 'target_hash'))
+	is_in_attack_chain = get_block_field(target_hash, 'is_in_attack_chain')
+	processed = get_field(receiver, is_in_attack_chain, 'processed')
+	#pdb.set_trace()
+	if source_hash not in processed:
+		dep = get_field(receiver, is_in_attack_chain, 'dependencies')
+		if source_hash not in dep.keys():
+			dep[source_hash] = [[],[]]#依赖分为两种，一种是区块，一种是vote，第一个list记录
+		dep[source_hash][1].append(int(hash))
+		update_field(receiver, is_in_attack_chain, 'dependencies', dep)
+		return False
 	
+	justified = get_field(receiver, is_in_attack_chain, 'justified')
+	if source_hash not in justified:
+		return False
 
+	if target_hash not in processed:
+		dep = get_field(receiver, is_in_attack_chain, 'dependencies')
+		if target_hash not in dep.keys():
+			dep[target_hash] = [[],[]]#依赖分为两种，一种是区块，一种是vote，第一个list记录
+		dep[target_hash][1].append(int(hash))
+		update_field(receiver, is_in_attack_chain, 'dependencies', dep)
+		return False
+
+	if not is_ancestor(receiver, source_hash, target_hash, is_in_attack_chain):
+		return False
+	
+	#TODO:增加一个vote的sender是否属于volidator验证集合的判断，毫无必要
+	
+	sender = get_vote_field(hash, 'sender')
+	votes = get_field(receiver, is_in_attack_chain, 'votes')
+	if sender not in votes:
+		votes[sender] = []
+	target_epoch = get_vote_field(hash, 'target_epoch')
+	source_epoch = get_vote_field(hash, 'source_epoch')
+	for past_vote_hash in votes[sender]:
+		past_target_epoch = get_vote_field(past_vote_hash, 'target_epoch')
+		if past_target_epoch == target_epoch:
+			print("miner %d got slashed! " % sender)
+			deposit = get_field(receiver, is_in_attack_chain, 'deposit')
+			deposit[sender] = 0
+			update_field(receiver, is_in_attack_chain, 'deposit', deposit)
+			#stake = get_field(receiver, is_in_attack_chain, 'stake')
+			#需要更新deposit和stake
+			return False
+		
+		past_source_epoch = get_vote_field(past_vote_hash, 'source_epoch')
+		if (past_source_epoch < source_epoch and past_target_epoch > target_epoch)\
+			or (past_source_epoch > source_epoch and past_target_epoch < target_epoch):
+			print("miner %d got slashed! " % sender)
+			deposit = get_field(receiver, is_in_attack_chain, 'deposit')
+			deposit[sender] = 0
+			update_field(receiver, is_in_attack_chain, 'deposit', deposit)
+			return False
+	votes[sender].append(int(hash))
+	update_field(receiver, is_in_attack_chain, 'votes', votes)
+
+	print(f"miner %d accept the vote of hash {hash}" %receiver)
+	deposit = get_field(receiver, is_in_attack_chain, 'deposit')
+	vote_count = get_field(receiver, is_in_attack_chain, 'vote_count')
+	if source_hash not in vote_count:
+		vote_count[source_hash] = {}
+	vote_count[source_hash][target_hash] = \
+		vote_count[source_hash].get(target_hash, 0) + deposit[sender]
+	update_field(receiver, is_in_attack_chain, 'vote_count', vote_count)
+	total = 0
+	for key in deposit.keys():
+		total += deposit[key]
+	if vote_count[source_hash][target_hash] >= (total * 2) / 3:
+		justified = get_field(receiver, is_in_attack_chain, 'justified')
+		justified.append(target_hash)
+		update_field(receiver, is_in_attack_chain, 'justified',justified)
+		highest_justified_checkpoint = get_field(receiver, is_in_attack_chain, 'highest_justified_checkpoint')
+		highest_justified_epoch = get_block_field(highest_justified_checkpoint, 'epoch')
+		if target_epoch > highest_justified_epoch:
+			highest_justified_checkpoint = target_hash
+			update_field(receiver, is_in_attack_chain, 'highest_justified_checkpoint', target_hash)
+		if target_epoch - source_epoch == 1:
+			finalized = get_field(receiver, is_in_attack_chain, 'finalized')
+			finalized.append(source_hash)
+			update_field(receiver, is_in_attack_chain, 'finalized', finalized)
+	return True

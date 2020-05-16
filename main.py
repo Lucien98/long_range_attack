@@ -12,7 +12,6 @@ def is_not_succeed():
 	db = pymysql.connect("localhost", "root", "root", "attack")
 	cur = db.cursor()
 	cur.execute(sql_is_succeed)
-	#import pdb; pdb.set_trace()
 	res = cur.fetchall()[0][0]
 	db.commit()
 	cur.close()
@@ -20,19 +19,29 @@ def is_not_succeed():
 
 	return res
 
-#long_range_attack.init()
+long_range_attack.init()
 N = 0
 while is_not_succeed():
 	long_range_attack.process_block(N)
-	for miner in range(0, Num_miners):
-		long_range_attack.propose_block('honest', miner, N)
-		long_range_attack.propose_block('attack', miner, N)
+	miner = long_range_attack.elect_proposal('honest')
+	long_range_attack.propose_block('honest', miner, N)
+	miner = long_range_attack.elect_proposal('attack')
+	long_range_attack.propose_block('attack', miner, N)
 	N = N + 1
 
-LOG_DIR = "plot"
+LOG_DIR = "plot_lra"
 if not os.path.exists(LOG_DIR):
 	os.makedirs(LOG_DIR)
-filename = os.path.join(LOG_DIR, "honest.png")
-plot_miner_view([0,2,4], filename)
-filename = os.path.join(LOG_DIR, "attacker.png")
-plot_miner_view([1,3,8], filename)
+M = 114
+for N in range(114, 150):
+	long_range_attack.brdcst_atk_blk(N*Block_Proposal_Time)
+	long_range_attack.process_block(N)
+	miner = long_range_attack.elect_proposal('honest')
+	long_range_attack.propose_block('honest', miner, N)
+	miner = long_range_attack.elect_proposal('attack')
+	long_range_attack.propose_block('attack', miner, N)
+
+	filename = os.path.join(LOG_DIR, "honest{}.png".format(N))
+	plot_miner_view([0,2,4], filename)
+	filename = os.path.join(LOG_DIR, "attacker{}.png".format(N))
+	plot_miner_view([1,3,8], filename)
