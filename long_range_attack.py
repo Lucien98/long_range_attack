@@ -70,8 +70,7 @@ def init():
 		+       str(is_in_attack_chain)        +"," \
 		+ "'" + str(voting_power) + "'" + "," \
 		+       str(accu_regular_num)        +"," \
-		+ "'" + str(attacker_ratio) + "'" 
-		+ ");" 
+		+ "'" + str(attacker_ratio) + "',0" + ");" 
 	sql_miners = "insert into miners values"
 	for i in miners['attacker']:
 		id = i
@@ -302,7 +301,7 @@ def propose_block(chain, id, N):
 		+       str(is_in_attack_chain)        +"," \
 		+ "'" + str(voting_power) + "'" + "," \
 		+       str(accu_regular_num)        +"," \
-		+ "'" + str(attacker_ratio) + "'" + ");"
+		+ "'" + str(attacker_ratio) + "'," + str(N) + ");"
 	sql_broadcast = broadcast(chain, hash, (N+1)*Block_Proposal_Time, proposal_id)
 	cursor.execute(sql_block)
 	print("miner "+ str(proposal_id) + " propose "+ str(N + 1) + "th block " + str(hash) + " in " + chain + " chain")
@@ -535,5 +534,5 @@ def process_block(N):
 		block_hash = msg[2]# typr:str
 		on_receive(receiver, block_hash)
 miners = generate_attacker()
-# miners['attacker'] = [1, 3, 8]
-# miners['honest'] = [0, 2, 4, 5, 6, 7, 9]
+# miners['attacker'] = [2, 3, 6,7,8]
+# miners['honest'] = [0, 1, 4, 5, 9]
