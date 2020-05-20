@@ -53,9 +53,9 @@ def init():
 	is_in_attack_chain = 2
 	accu_regular_num = 1
 	# 权益分配
-	voting_power = stake = [0.28888417, 0.0820192, 0.06432365,\
-	 0.11630922, 0.12024268, 0.13770893, 0.01833147, 0.02759777,\
-	  0.05940994, 0.08517291]#partition(Num_miners)
+	voting_power = stake = partition(Num_miners)#[0.28888417, 0.0820192, 0.06432365,\
+	 # 0.11630922, 0.12024268, 0.13770893, 0.01833147, 0.02759777,\
+	 #  0.05940994, 0.08517291]#
 	write_txt('vpa_lr', voting_power)
 	write_txt('vph_lr', voting_power)
 	attacker_ratio = 0
@@ -70,7 +70,8 @@ def init():
 		+       str(is_in_attack_chain)        +"," \
 		+ "'" + str(voting_power) + "'" + "," \
 		+       str(accu_regular_num)        +"," \
-		+ "'" + str(attacker_ratio) + "'" + ");" 
+		+ "'" + str(attacker_ratio) + "'" 
+		+ ");" 
 	sql_miners = "insert into miners values"
 	for i in miners['attacker']:
 		id = i
@@ -108,12 +109,26 @@ def init():
 	cursor.close()
 	db.close()
 
+def is_not_succeed():
+	sql_is_succeed = "select (select max(accu_regular_num) from block "\
+		+"where is_in_attack_chain = 1 or is_in_attack_chain = 2) " \
+		+"<= (select max(accu_regular_num) from block " \
+		+ "where is_in_attack_chain = 0 or is_in_attack_chain = 2);"	
+	db = pymysql.connect("localhost", "root", "root", "attack")
+	cur = db.cursor()
+	cur.execute(sql_is_succeed)
+	res = cur.fetchall()[0][0]
+	db.commit()
+	cur.close()
+	db.close()
+	return res
+
 def elect_proposal(chain):
 	max_voting_power = 0
 	if chain == 'attack':
 		voting_power = read_txt('vpa_lr')
 	if chain == 'honest':
-		voting_power = read_txt('vph_lr')
+		voting_power = read_txt('vph_lr') if is_not_succeed() else read_txt('vpa_lr')
 	max_voting_power = sorted(voting_power, reverse = True)[0]
 	for i in range(0, Num_miners):
 		if voting_power[i] == max_voting_power:
@@ -123,6 +138,14 @@ def elect_proposal(chain):
 	returns hash of highest block 
 """
 def propose_block(chain, id, N):
+	#若攻击成功，则诚实链中攻击者不提出区块，因为已经没有必要在其上挖矿
+	#而在攻击链轮到诚实者出块时，诚实者也不出，它会在自己的诚实链中轮到自己出块时
+	#选择攻击链出块
+	if not is_not_succeed():
+		if chain == 'attack' and id in miners['honest'] or\
+			chain == 'honest' and id in miners['attacker']:
+			print("Now attack succeeds and no block was proposed at {}th slot in {} chain".format(N+1,chain))
+			return
 	#取出processed字段，查询出processed字段
 	view_id = id
 	if chain == 'attack':
@@ -242,16 +265,27 @@ def propose_block(chain, id, N):
 			type = 'regular'
 			is_in_attack_chain = 1
 			accu_regular_num += 1
-	voting_power = read_txt('vph_lr') if chain == 'honest' \
-	else read_txt('vpa_lr')
+	#更新voting_power
+	if chain == 'attack':
+		voting_power = read_txt('vpa_lr')
+	if chain == 'honest':
+		voting_power = read_txt('vph_lr') if is_not_succeed() else read_txt('vpa_lr')
+	#取消stale区块的存在，所以相应的攻击者在攻击成功前将voting_power更新就OK了
 	minus = 0
 	for i in range(0, Num_miners):
 		if i != proposal_id:
 			voting_power[i] += stake[i]
 			minus += stake[i]
 	voting_power[proposal_id] -= minus
-	write_txt('vph_lr', voting_power) if chain == 'honest' \
-	else write_txt('vpa_lr', voting_power)	
+	if chain == 'attack':
+		write_txt('vpa_lr', voting_power)
+	if chain == 'honest':
+		write_txt('vph_lr', voting_power) if is_not_succeed() else write_txt('vpa_lr', voting_power)
+	if is_not_succeed():
+		if chain == 'attack' and id in miners['honest'] or\
+			chain == 'honest' and id in miners['attacker']:
+			print("Now attack is undergoing and no block was proposed at {}th slot in {} chain".format(N+1,chain))
+			return		
 	for i in range(0, Num_miners):
 		voting_power[i] = float(("%."+str(Precision)+ "f") % voting_power[i])			
 	attacker_ratio = 0
@@ -331,6 +365,8 @@ def brdcst_atk_blk(time):
 	res = cur.fetchall()
 	blocks = ()
 
+	if len(res) == 0:
+		return
 	sql_msg_receival = 'insert into msg_receival values'
 	for i in range(len(res)):
 		for miner in miners['honest']:
@@ -342,12 +378,13 @@ def brdcst_atk_blk(time):
 						+ "'" + str(res[i][0]) + "',"\
 						+ str(time+delay) + "),"
 			blocks = blocks + (str(res[i][0]),)
-	blocks = str(blocks).replace("),", ")")
+	blocks = str(blocks).replace(",)", ")")
 	sql_update_block = "update block set voting_power = '0' where hash in " + blocks + ";"
+	#print(sql_update_block)
 	sql_msg_receival = sql_msg_receival[0:-1]
 	sql_msg_receival += ";"
 
-	cur.execute(sql_update_block)
+	if blocks != '()': cur.execute(sql_update_block)
 	cur.execute(sql_msg_receival)
 	db.commit()
 	cur.close()
@@ -497,6 +534,6 @@ def process_block(N):
 		receiver = msg[0]
 		block_hash = msg[2]# typr:str
 		on_receive(receiver, block_hash)
-# miners = generate_attacker()
-miners['attacker'] = [1, 3, 8]
-miners['honest'] = [0, 2, 4, 5, 6, 7, 9]
+miners = generate_attacker()
+# miners['attacker'] = [1, 3, 8]
+# miners['honest'] = [0, 2, 4, 5, 6, 7, 9]
