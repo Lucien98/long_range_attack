@@ -85,7 +85,7 @@ while pre_hash != hash:
 
 plt.plot(time_attack,ratio_list_attack,label='attacker ratio in attack chain',linewidth=3,color='r',marker='o',
 	markerfacecolor='blue',markersize=0.5)
-plt.plot(time_honest,ratio_list_honest,label='honest ratio in honest chain',linewidth=3,color='r',marker='o',
+plt.plot(time_honest,ratio_list_honest,label='honest ratio in honest chain',linewidth=3,color='g',marker='o',
 	markerfacecolor='green',markersize=0.5)
 plt.legend()
 # plt.show()
