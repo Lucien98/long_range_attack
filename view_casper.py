@@ -8,6 +8,7 @@ import pymysql
 
 def miner_view(miner_id):
 	blocks = []
+	finalized = []
 	if miner_id in miners['attacker']:
 		processed = get_field(miner_id, 0, 'processed')
 		for block_hash in processed:
@@ -15,10 +16,13 @@ def miner_view(miner_id):
 		processed = get_field(miner_id, 1, 'processed')
 		for block_hash in processed:
 			blocks.append(str(block_hash))
+		finalized = get_field(miner_id, 0, 'finalized')
+		finalized += get_field(miner_id, 1, 'finalized')
 	else:
 		processed = get_field(miner_id, 0, 'processed')
 		for block_hash in processed:
 			blocks.append(str(block_hash))
+		finalized = get_field(miner_id, 0, 'finalized')
 	blocks = str(blocks)
 	blocks = blocks.replace("[","(")
 	blocks = blocks.replace("]",")")
@@ -31,13 +35,16 @@ def miner_view(miner_id):
 	db.commit()
 	cur.close()
 	db.close()
-
+	
 	G = nx.DiGraph()
 	for item in result:
 		hash = item[0]
 		pre_hash = item[1]
 		height = item[4]
-		G.add_node(hash, object = [item[3],height])#item[3]是字符串类型,type
+		if int(hash) in finalized:
+			G.add_node(hash, object = ['finalized',height])
+		else:
+			G.add_node(hash, object = [item[3],height])#item[3]是字符串类型,type
 		if hash != pre_hash:
 			G.add_edge(hash, pre_hash, object = item[2])#item[2]是int型,is_in_attack_chain
 	return G
@@ -62,8 +69,10 @@ def plot_miner_view(miners, image_file):
 		for node in G.nodes():
 			if G.nodes()[node]['object'][0] == 'stale':
 				color = 'g'
-			else:
+			elif G.nodes()[node]['object'][0] == 'regular':
 				color = 'r'
+			else:
+				color = 'b'
 			node_colors.append(color)
 
 			height = G.nodes()[node]['object'][1]

@@ -390,6 +390,18 @@ def brdcst_atk_blk(time):
 	db.close()
 
 
+def is_attacker(miner_id):
+	db = pymysql.connect("localhost", "root", "root", "attack")
+	cur = db.cursor()
+	sql_is_attacker = "select is_attacker from miners where id = " + str(miner_id) + ";"
+	cur.execute(sql_is_attacker)
+	res = cur.fetchall()[0][0]
+	db.commit()
+	cur.close()
+	db.close()
+
+	return int(res)
+
 """获取一个节点的processed视图
 返回的是一个int型元组，其中元素为hash值
 """
@@ -405,7 +417,7 @@ def get_processed(miner_id, is_in_attack_chain):
 	db.close()
 	#返回的结果是一个字符串'(1,)'，将其解析为元组之后返回
 	processed = res_pro[0][0]
-	if miner_id not in miners['honest']:
+	if is_attacker(miner_id):
 		if is_in_attack_chain:
 			processed = processed.split(";")[1]
 		else:

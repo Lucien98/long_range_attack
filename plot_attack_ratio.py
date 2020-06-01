@@ -1,5 +1,6 @@
 import pymysql
 import matplotlib.pyplot as plt
+import sys
 
 db = pymysql.connect("localhost", "root", "root", "attack")
 cur = db.cursor()
@@ -40,8 +41,8 @@ while pre_hash != hash:
 	N = res[2]
 	ratio_list_attack.append(attacker_ratio)
 	time_attack.append(N)
-print(time_attack)
-print(ratio_list_attack)
+# print(time_attack)
+# print(ratio_list_attack)
 
 sql_head="""select hash from block 
 where accu_regular_num = 
@@ -78,13 +79,20 @@ while pre_hash != hash:
 	N = res[2]
 	ratio_list_honest.append(1 - honest_ratio)
 	time_honest.append(N)
-print(time_honest)
-print(ratio_list_honest)
+# print(time_honest)
+# print(ratio_list_honest)
 
 
 plt.plot(time_attack,ratio_list_attack,label='attacker ratio in attack chain',linewidth=3,color='r',marker='o',
-	markerfacecolor='blue',markersize=12)
+	markerfacecolor='blue',markersize=0.5)
 plt.plot(time_honest,ratio_list_honest,label='honest ratio in honest chain',linewidth=3,color='r',marker='o',
-	markerfacecolor='green',markersize=12)
+	markerfacecolor='green',markersize=0.5)
 plt.legend()
-plt.show()
+# plt.show()
+plt.savefig(sys.argv[1])
+sql_fork_ratio = "select (select max(height) from block where is_in_attack_chain = 0) / (select count(hash) from block where is_in_attack_chain = 0);"
+cur.execute(sql_fork_ratio)
+res = cur.fetchall()[0][0]
+print("effective ratio is {}".format(res))
+cur.close()
+db.close()

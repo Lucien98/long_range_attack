@@ -1,16 +1,29 @@
 import networkx as nx
 from long_range_attack import get_processed
-from long_range_attack import miners
+#from long_range_attack import miners
 import pygraphviz
 import matplotlib.pyplot as plt
 import random
 import pymysql
 import pdb
 
+def is_attacker(miner_id):
+	db = pymysql.connect("localhost", "root", "root", "attack")
+	cur = db.cursor()
+	sql_is_attacker = "select is_attacker from miners where id = " + str(miner_id) + ";"
+	cur.execute(sql_is_attacker)
+	res = cur.fetchall()[0][0]
+	db.commit()
+	cur.close()
+	db.close()
+
+	return int(res)
+
 def miner_view(miner_id):
 	blocks = []
 	#pdb.set_trace()
-	if miner_id in miners['attacker']:
+	
+	if is_attacker(miner_id):
 		processed = get_processed(miner_id, 0)
 		for block_hash in processed:
 			blocks.append(str(block_hash))
